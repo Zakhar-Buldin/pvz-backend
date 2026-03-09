@@ -4,10 +4,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db_depends import get_async_db
 from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as DeliveryModel
-from app.schemas import Delivery as DeliverySchema, DeliveryItem as DeliveryItemSchema, Operation as OperationSchema
+from app.schemas import Delivery as DeliverySchema, DeliveryItem as DeliveryItemSchema
 from sqlalchemy.orm import selectinload
-from app.models.products import Product as ProductModel
-from app.models.pvz import PVZ as PVZModel
 from app.models.operations import Operation as OperationModel
 from datetime import timedelta, datetime
 import random
@@ -73,8 +71,11 @@ async def update_order_status(
     return order
 
 # PUT эндпоинт для получения оператором всех заказов (изменения их статуса на received)
-@router.put("/received_all/{delivery_id}", response_model=DeliverySchema)
+@router.put("/received_delivery/{delivery_id}", response_model=DeliverySchema)
 async def receive_all(delivery_id: int, db: AsyncSession = Depends(get_async_db)):
+    """
+    Эндпоинт для получения оператором доставки (меняют статус всех заказов на received)
+    """
     stmt = await db.scalars(
                          select(DeliveryModel)
                   .where(DeliveryModel.id == delivery_id)
@@ -93,7 +94,7 @@ async def receive_all(delivery_id: int, db: AsyncSession = Depends(get_async_db)
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Повторная попытка изменить статус заказа"
             )
-        item_time = start_time + timedelta(seconds=random.randint(30, 180) * i)
+        item_time = start_time + timedelta(seconds=random.randint(30, 120) * i)
         item.status = "received"
         operation = OperationModel(
             delivery_item_id=item.id,

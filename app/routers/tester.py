@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException, status
 from datetime import datetime, timedelta
 from fastapi.params import Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy.orm import selectinload
 from app.db_depends import get_async_db
 from app.models.operations import Operation as OperationModel
 from app.models.pvz import PVZ as PVZModel
-from sqlalchemy import select, func, extract, text, update
+from sqlalchemy import select, text
 from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as DeliveryModel
-from app.schemas import Delivery as DeliverySchema, DeliveryItem as DeliveryItemSchema
+from app.schemas import Delivery as DeliverySchema
 from app.models.products import Product as ProductModel
 import random
 
@@ -47,7 +47,7 @@ async def accept_random_delivery(
 
 
     # 2. Выбираем случайное количество товаров для поставки
-    selected_products = random.sample(available_products, random.randint(25, len(available_products)))
+    selected_products = random.sample(available_products, random.randint(40, len(available_products)))
 
     # 3. Создаём поставку
     new_delivery = DeliveryModel(
@@ -106,7 +106,10 @@ async def clear_all_data(
 @router.post("/generate_evening_flow/{pvz_id}")
 async def generate_evening_flow(
         pvz_id: int,
-        date: str,
+        delivery_id: int,
+        date: str = Query(...,
+                                description="Дата формате YYYY-MM-DD",
+                                pattern=r"^\d{4}-\d{2}-\d{2}$"),
         db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -114,13 +117,15 @@ async def generate_evening_flow(
     Использует ту же логику, что и реальный оператор.
     """
     # Получаем все товары этого ПВЗ, которые уже приняты (status='received')
-    result = await db.execute(
+    result = await db.scalars(
         select(DeliveryItemModel)
         .join(DeliveryModel)
+        .where(DeliveryModel.id == delivery_id)
         .where(DeliveryModel.pvz_id == pvz_id)
         .where(DeliveryItemModel.status == "received")
     )
-    items = result.scalars().all()
+
+    items = result.all()
     if not items:
         raise HTTPException(404, "Нет доступных заказов для генерации операций")
 
@@ -128,9 +133,9 @@ async def generate_evening_flow(
     hours_weights = [1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 2]
 
     created = 0
-    selected_items = random.sample(items, min(50, len(items)))
+    selected_items = random.sample(items, len(items))
 
-    for item in selected_items[:50]:
+    for item in selected_items:
         # выбираем час с учётом веса
         hour = random.choices(range(9, 22), weights=hours_weights)[0]
         minute = random.randint(0, 59)
@@ -150,3 +155,59 @@ async def generate_evening_flow(
 
     await db.commit()
     return {"message": f"Создано {created} операций для ПВЗ {pvz_id}"}
+
+@router.post("/generate_morning_flow/{pvz_id}")
+async def generate_morning_flow(
+        pvz_id: int,
+        delivery_id: int,
+        date: str = Query(...,
+                                description="Дата формате YYYY-MM-DD",
+                                pattern=r"^\d{4}-\d{2}-\d{2}$"),
+        db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Генерирует поток клиентов (выдачи/возвраты) преимущественно в утренние/обеденные часы.
+    Использует ту же логику, что и реальный оператор.
+    """
+    stmt = await db.scalars(
+                         select(DeliveryModel)
+                  .where(DeliveryModel.id == delivery_id)
+                  .options(selectinload(DeliveryModel.items)))
+
+    delivery = stmt.first()
+
+    if delivery is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Объект доставки еще не сформирован складе, или неверный ID доставки')
+
+    if delivery.pvz_id != pvz_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Эта доставка не связана с данным пунктом выдачи!')
+
+    hour = random.randint(9, 12)
+    minute = random.randint(0, 59)
+    created = 0
+    try:
+        start_time = datetime.strptime(date, "%Y-%m-%d").replace(hour=hour, minute=minute)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный формат date. Ожидается YYYY-MM-DD")
+
+    for i, item in enumerate(delivery.items):
+        if item.status != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Повторная попытка изменить статус заказа"
+            )
+
+        item_time = start_time + timedelta(minutes=i) + timedelta(seconds=random.randint(0, 59))
+        item.status = "received"
+        operation = OperationModel(
+            delivery_item_id=item.id,
+            pvz_id=pvz_id,
+            action="received",
+            timestamp=item_time
+        )
+        db.add(operation)
+        created += 1
+
+    await db.commit()
+    return {"message": f"Создано {created} операций для ПВЗ {pvz_id}"}
+

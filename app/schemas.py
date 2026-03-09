@@ -3,9 +3,6 @@ from decimal import Decimal
 from datetime import datetime
 
 class DeliveryItem(BaseModel):
-    """
-    Модель товара в поставке
-    """
     id: int = Field(..., description="Уникальный идентификатор записи")
     delivery_id: int = Field(..., description="ID поставки")
     product_id: int = Field(..., description="ID товара")
@@ -14,9 +11,6 @@ class DeliveryItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class Delivery(BaseModel):
-    """
-    Модель поставки в ПВЗ
-    """
     id: int = Field(..., description="Уникальный идентификатор поставки")
     pvz_id: int = Field(..., description="ID пункта выдачи")
     total_price: Decimal = Field(gt=0, decimal_places=2)
@@ -49,3 +43,11 @@ class WeeklyLoadReport(BaseModel):
     start_date: str = Field(..., description="Дата начала недели")
     daily: list[DailyLoadReport] = Field(..., description="Массив дневных отчётов за неделю")
     total_overload_hours: int = Field(..., description="Общее количество перегрузок за неделю")
+
+class Redirection(BaseModel):
+    id: int = Field(..., description="ID перенаправления")
+    delivery_item_id: int = Field(..., description="ID заказа")
+    old_delivery_id: int = Field(..., description="ID старой доставки")
+    new_delivery_id: int = Field(..., description="ID новой доставки")
+    timestamp: datetime = Field(..., description="Время операции перенаправления")
+    model_config = ConfigDict(from_attributes=True)
