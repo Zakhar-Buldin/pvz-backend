@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import csv
 import io
-
+from app.models import User as UserModel
 from app.db_depends import get_async_db
 from app.models.products import Product as ProductModel
 from app.models.pvz import PVZ as PVZModel
@@ -12,11 +12,14 @@ from app.models.operations import Operation as OperationModel
 from app.models.redirections import Redirection as RedirectionModel
 from datetime import datetime, timedelta
 from app.services.overloads_service import InvalidDateError, PVZNotFoundError, get_daily_load_data, get_weekly_load_data
+from app.auth import get_current_analyst
+
 router = APIRouter(prefix="/export", tags=["export"])
 
 @router.get("/products")
 async def export_products(
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -49,7 +52,8 @@ async def export_products(
 
 @router.get("/pvz")
 async def export_products(
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -90,7 +94,8 @@ async def export_operations(
     end_date_str: str | None = Query(None,
                                 description="Дата в формате YYYY-MM-DD",
                                 pattern=r"^\d{4}-\d{2}-\d{2}$"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -151,7 +156,8 @@ async def export_redirections(
     end_date_str: str | None = Query(None,
                                 description="Дата в формате YYYY-MM-DD",
                                 pattern=r"^\d{4}-\d{2}-\d{2}$"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -205,7 +211,8 @@ async def export_daily_load(
                 description="Дата в формате YYYY-MM-DD",
                 pattern = r"^\d{4}-\d{2}-\d{2}$"),
 
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Возвращает почасовую нагрузку на ПВЗ за указанную дату.
@@ -246,7 +253,8 @@ async def export_weekly_load(
                                 description="Дата начала недели (понедельник) в формате YYYY-MM-DD",
                                 pattern=r"^\d{4}-\d{2}-\d{2}$"),
 
-        db: AsyncSession = Depends(get_async_db)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Возвращает недельный отчёт о нагрузке ПВЗ.

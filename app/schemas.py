@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from decimal import Decimal
 from datetime import datetime
 
@@ -50,4 +50,15 @@ class Redirection(BaseModel):
     old_delivery_id: int = Field(..., description="ID старой доставки")
     new_delivery_id: int = Field(..., description="ID новой доставки")
     timestamp: datetime = Field(..., description="Время операции перенаправления")
+    model_config = ConfigDict(from_attributes=True)
+
+class UserCreate(BaseModel):
+    email: EmailStr = Field(description="Email пользователя")
+    password: str = Field(..., min_length=8, description="Пароль (минимум 8 символов)")
+    role: str = Field(..., pattern="^(operator|supervisor|tester|analyst)$", description="Роли: operator, supervisor, tester или analyst")
+
+class User(BaseModel):
+    id: int = Field(..., description="ID пользователя")
+    email: EmailStr = Field(description="Email пользователя")
+    role: str = Field(..., description="Роли: operator, supervisor, tester или analyst")
     model_config = ConfigDict(from_attributes=True)

@@ -13,16 +13,20 @@ from app.services.operations_service import get_operations_data
 from datetime import datetime
 from app.services.operations_service import PVZNotFoundError
 from app.services.overloads_service import InvalidDateError
+from app.models import User as UserModel
+from app.auth import get_current_supervisor
+from app.models.pvz import PVZ as PVZModel
 router = APIRouter(
-    prefix="/supervizor",
-    tags=["supervizor"],
+    prefix="/supervisor",
+    tags=["supervisor"],
 )
 
 @router.get("/statistics/one_day/{pvz_id}", response_model=DailyLoadReportSchema)
 async def get_daily_load(
     pvz_id: int,
     date: str,  # формат YYYY-MM-DD
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_supervisor),
 ):
     """
     Возвращает почасовую нагрузку на ПВЗ за указанную дату.
@@ -40,7 +44,8 @@ async def get_daily_load(
 async def get_weekly_load(
         pvz_id: int,
         start_date: str = Query(..., description="Дата начала недели (понедельник) в формате YYYY-MM-DD"),
-        db: AsyncSession = Depends(get_async_db)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_supervisor)
 ):
     """
     Возвращает недельный отчёт о нагрузке ПВЗ.
@@ -64,7 +69,8 @@ async def get_operations(
         description="Дата в формате YYYY-MM-DD",
         pattern=r"^\d{4}-\d{2}-\d{2}$"  # опциональная проверка формата
     ),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_supervisor)
 ):
     """
     Возвращает все операции, совершённые на ПВЗ.
@@ -93,7 +99,9 @@ async def get_operations(
 @router.put("/change_delivery/{delivery_item_id}", response_model=DeliveryItemSchema)
 async def change_delivery(delivery_item_id: int,
                           new_delivery_id: int,
-                          db: AsyncSession = Depends(get_async_db)):
+                          db: AsyncSession = Depends(get_async_db),
+                          current_user: UserModel = Depends(get_current_supervisor)
+                          ):
     """
     Перенаправляет заказы в другие доставки
     """
@@ -131,3 +139,33 @@ async def change_delivery(delivery_item_id: int,
     await db.commit()
     await db.refresh(item)
     return item
+
+@router.put("/change_pvz_for_operator/{operator_id}")
+async def change_pvz_for_operator(
+                                operator_id: int,
+                                new_pvz_id: int,
+                                db: AsyncSession = Depends(get_async_db),
+                                current_user: UserModel = Depends(get_current_supervisor)):
+    stmt_1 = await db.scalars(select(UserModel)
+                              .where(UserModel.id == operator_id)
+                              .where(UserModel.role == "operator"))
+    operator = stmt_1.first()
+    if operator is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Оператор не найден")
+
+    if new_pvz_id == operator.pvz_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Оператор уже закреплён за этим ПВЗ")
+
+    stmt = await db.scalars(select(PVZModel).where(PVZModel.id == new_pvz_id))
+    pvz = stmt.first()
+
+    if pvz is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ПВЗ не найден")
+
+    operator.pvz_id = new_pvz_id
+    await db.commit()
+    await db.refresh(operator)
+    return {"message": f"Оператор {operator_id} закреплён за ПВЗ {operator.pvz_id}"}
+
+
+

@@ -10,6 +10,8 @@ from sqlalchemy import select, text
 from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as DeliveryModel
 from app.schemas import Delivery as DeliverySchema
 from app.models.products import Product as ProductModel
+from app.auth import get_current_tester
+from app.models import User as UserModel
 import random
 
 
@@ -23,7 +25,13 @@ router = APIRouter(
 @router.post("/accept_delivery/{pvz_id}", response_model=DeliverySchema)
 async def accept_random_delivery(
         pvz_id: int,
-        db: AsyncSession = Depends(get_async_db)
+        db: AsyncSession = Depends(get_async_db),
+        created_date: str = Query(...,
+                          description="Предполагаемая дата поставки на ПВЗ формате YYYY-MM-DD",
+                          pattern=r"^\d{4}-\d{2}-\d{2}$"),
+        min_quan: int = Query(default=1, description="Минимальное кол-во генерируемых заказов"),
+        max_quan: int = Query(..., description="Максимальное кол-во генерируемых заказов"),
+        current_user: UserModel = Depends(get_current_tester)
 ):
     """
     Создаёт объект Delivery, который имитирует поставку товаров на ПВЗ.
@@ -31,6 +39,14 @@ async def accept_random_delivery(
     На их основе собирается объект Delivery, который представляет собой большую коробку, в которой хранятся все заказы
     и которая поставляется на ПВЗ.
     """
+    if min_quan < 1 or max_quan < 1 or min_quan > max_quan:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Некорретные данные диапазона чисел для генерации заказов!")
+
+    try:
+        result_date = datetime.strptime(created_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный формат date. Ожидается YYYY-MM-DD")
+
     # Проверяем существование ПВЗ
     pvz = await db.get(PVZModel, pvz_id)
     if not pvz:
@@ -47,12 +63,13 @@ async def accept_random_delivery(
 
 
     # 2. Выбираем случайное количество товаров для поставки
-    selected_products = random.sample(available_products, random.randint(40, len(available_products)))
+    selected_products = [available_products[random.randint(0, len(available_products) - 1)] for _ in range(random.randint(min_quan, max_quan))]
 
     # 3. Создаём поставку
     new_delivery = DeliveryModel(
         pvz_id=pvz_id,
-        total_price=sum(i.price for i in selected_products)
+        total_price=sum(i.price for i in selected_products),
+        created_at=result_date
     )
 
     db.add(new_delivery)
@@ -83,7 +100,8 @@ async def accept_random_delivery(
 @router.delete("/clear_all_data", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_all_data(
     confirm: bool = Query(False, description="Подтверждение очистки (обязательно)"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_tester)
 ):
     """
     Удаляет все данные из таблиц operations, delivery_items, deliveries.
@@ -98,6 +116,7 @@ async def clear_all_data(
     await db.execute(text("TRUNCATE TABLE operations RESTART IDENTITY CASCADE;"))
     await db.execute(text("TRUNCATE TABLE delivery_items RESTART IDENTITY CASCADE;"))
     await db.execute(text("TRUNCATE TABLE deliveries RESTART IDENTITY CASCADE;"))
+    await db.execute(text("TRUNCATE TABLE redirections RESTART IDENTITY CASCADE;"))
 
     await db.commit()
     return None
@@ -107,15 +126,17 @@ async def clear_all_data(
 async def generate_evening_flow(
         pvz_id: int,
         delivery_id: int,
-        date: str = Query(...,
-                                description="Дата формате YYYY-MM-DD",
-                                pattern=r"^\d{4}-\d{2}-\d{2}$"),
-        db: AsyncSession = Depends(get_async_db)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_tester)
 ):
     """
     Генерирует поток клиентов (выдачи/возвраты) преимущественно в вечерние часы.
     Использует ту же логику, что и реальный оператор.
     """
+    delivery = await db.get(DeliveryModel, delivery_id)
+    if delivery is None:
+        raise HTTPException(404, "Доставки не существует!")
+
     # Получаем все товары этого ПВЗ, которые уже приняты (status='received')
     result = await db.scalars(
         select(DeliveryItemModel)
@@ -130,7 +151,7 @@ async def generate_evening_flow(
         raise HTTPException(404, "Нет доступных заказов для генерации операций")
 
     # Нагрузка на ПВЗ в часы работы 9:00 - 21:00
-    hours_weights = [1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 2]
+    hours_weights = [1, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 3, 2]
 
     created = 0
     selected_items = random.sample(items, len(items))
@@ -139,7 +160,7 @@ async def generate_evening_flow(
         # выбираем час с учётом веса
         hour = random.choices(range(9, 22), weights=hours_weights)[0]
         minute = random.randint(0, 59)
-        op_time = datetime.strptime(date, "%Y-%m-%d").replace(hour=hour, minute=minute)
+        op_time = datetime(delivery.created_at.year, delivery.created_at.month, delivery.created_at.day).replace(hour=hour, minute=minute)
 
         action = random.choices(["issued", "returned"], weights=[0.8, 0.2])[0]
 
@@ -160,10 +181,8 @@ async def generate_evening_flow(
 async def generate_morning_flow(
         pvz_id: int,
         delivery_id: int,
-        date: str = Query(...,
-                                description="Дата формате YYYY-MM-DD",
-                                pattern=r"^\d{4}-\d{2}-\d{2}$"),
-        db: AsyncSession = Depends(get_async_db)
+        db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_tester)
 ):
     """
     Генерирует поток клиентов (выдачи/возвраты) преимущественно в утренние/обеденные часы.
@@ -185,17 +204,11 @@ async def generate_morning_flow(
     hour = random.randint(9, 12)
     minute = random.randint(0, 59)
     created = 0
-    try:
-        start_time = datetime.strptime(date, "%Y-%m-%d").replace(hour=hour, minute=minute)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Неверный формат date. Ожидается YYYY-MM-DD")
+    start_time = datetime(delivery.created_at.year, delivery.created_at.month, delivery.created_at.day).replace(hour=hour, minute=minute)
 
     for i, item in enumerate(delivery.items):
         if item.status != "pending":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Повторная попытка изменить статус заказа"
-            )
+                continue
 
         item_time = start_time + timedelta(minutes=i) + timedelta(seconds=random.randint(0, 59))
         item.status = "received"
@@ -211,3 +224,43 @@ async def generate_morning_flow(
     await db.commit()
     return {"message": f"Создано {created} операций для ПВЗ {pvz_id}"}
 
+@router.post("/create_new_pvz")
+async def create_new_pvz(
+        address: str = Query(..., min_length=5, max_length=50),
+        capacity_per_hour: int = Query(10, gt=0, le=100),
+        db: AsyncSession = Depends(get_async_db),
+):
+    pvz = PVZModel(
+        address=address,
+        capacity_per_hour=capacity_per_hour,
+    )
+
+    db.add(pvz)
+    await db.commit()
+
+    await db.refresh(pvz)
+    return {"message": f"ПВЗ {pvz.id} успешно создан"}
+
+
+@router.post("/create_products")
+async def create_100_products(db: AsyncSession = Depends(get_async_db)):
+    """
+    Создаёт 100 тестовых товаров в таблице products.
+    Предварительно очищает таблицу.
+    """
+    # Очищаем таблицу products
+    await db.execute(text("TRUNCATE TABLE products RESTART IDENTITY CASCADE;"))
+
+    # Генерируем 100 товаров со случайными ценами
+    products = []
+    for i in range(1, 101):
+        product = ProductModel(
+            name=f"Товар {i}",
+            price=round(random.uniform(100, 10000), 2)  # случайная цена от 100 до 10000
+        )
+        products.append(product)
+
+    db.add_all(products)
+    await db.commit()
+
+    return {"message": "100 товаров успешно созданы"}
