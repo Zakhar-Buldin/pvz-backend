@@ -11,7 +11,7 @@ class Operation(Base):
     delivery_item_id: Mapped[int] = mapped_column(ForeignKey("delivery_items.id"), nullable=False)
     pvz_id: Mapped[int] = mapped_column(ForeignKey("pvz.id"), nullable=False)  # денормализация
     action: Mapped[str] = mapped_column(String(50), nullable=False)  # например 'received', 'issued', 'returned'
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     # связи
     delivery_item: Mapped["DeliveryItem"] = relationship(back_populates="operations")

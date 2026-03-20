@@ -12,6 +12,7 @@ from app.schemas import Delivery as DeliverySchema
 from app.models.products import Product as ProductModel
 from app.auth import get_current_tester
 from app.models import User as UserModel
+from app.models import Redirection as RedirectionModel
 import random
 
 
@@ -229,6 +230,7 @@ async def create_new_pvz(
         address: str = Query(..., min_length=5, max_length=50),
         capacity_per_hour: int = Query(10, gt=0, le=100),
         db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_tester)
 ):
     pvz = PVZModel(
         address=address,
@@ -243,7 +245,8 @@ async def create_new_pvz(
 
 
 @router.post("/create_products")
-async def create_100_products(db: AsyncSession = Depends(get_async_db)):
+async def create_100_products(db: AsyncSession = Depends(get_async_db),
+                              current_user: UserModel = Depends(get_current_tester)):
     """
     Создаёт 100 тестовых товаров в таблице products.
     Предварительно очищает таблицу.
@@ -264,3 +267,51 @@ async def create_100_products(db: AsyncSession = Depends(get_async_db)):
     await db.commit()
 
     return {"message": "100 товаров успешно созданы"}
+
+@router.post("/redirect_orders/{delivery_id}")
+async def change_delivery(
+        delivery_id: int,
+        new_delivery_id: int,
+        quantity: int = Query(ge=1, le=100),
+        db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_tester)
+):
+    if delivery_id == new_delivery_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Нельзя перенаправить заказы в ту же доставку")
+
+    stmt = await db.scalars(
+        select(DeliveryModel)
+        .where(DeliveryModel.id == delivery_id)
+        .options(selectinload(DeliveryModel.items)))
+    old_delivery = stmt.first()
+
+    if old_delivery is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Доставка не найдена")
+
+    new_delivery = await db.get(DeliveryModel, new_delivery_id)
+    if new_delivery is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Доставка для перенаправления не найдена")
+
+    if old_delivery.created_at != new_delivery.created_at:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Нельзя перенаправлять заказы в доставку, которая запланирована на другую дату")
+
+    items = list(filter(lambda a: a.status == "pending", old_delivery.items))
+    length_items = len(items)
+    if length_items < quantity:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"В доставке нет такого количества заказов. Доступно только {length_items} заказов")
+
+    selected_items = random.sample(items, quantity)
+
+    for item in selected_items:
+        redirection = RedirectionModel(
+            delivery_item_id=item.id,
+            old_delivery_id=delivery_id,
+            new_delivery_id=new_delivery_id,
+            timestamp=old_delivery.created_at
+        )
+        db.add(redirection)
+        item.delivery_id = new_delivery_id
+
+    await db.commit()
+    return {"message": f"Заказы успешно перенаправлены в доставку {new_delivery_id}",
+            "count": len(selected_items)}

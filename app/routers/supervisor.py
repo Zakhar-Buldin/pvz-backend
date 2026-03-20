@@ -16,6 +16,7 @@ from app.services.overloads_service import InvalidDateError
 from app.models import User as UserModel
 from app.auth import get_current_supervisor
 from app.models.pvz import PVZ as PVZModel
+from sqlalchemy.orm import selectinload
 router = APIRouter(
     prefix="/supervisor",
     tags=["supervisor"],
@@ -105,20 +106,28 @@ async def change_delivery(delivery_item_id: int,
     """
     Перенаправляет заказы в другие доставки
     """
-    stmt_1 = await db.scalars(select(DeliveryModel)
-                        .where(DeliveryModel.id == new_delivery_id))
-
-    delivery = stmt_1.first()
-    if delivery is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Доставка не найдена!")
-
-    stmt_2 = await db.scalars(select(DeliveryItemModel)
-                      .where(DeliveryItemModel.id == delivery_item_id))
-
-    item = stmt_2.first()
-
+    stmt_1 = await db.scalars(select(DeliveryItemModel)
+                      .where(DeliveryItemModel.id == delivery_item_id)
+                      .options(
+                            selectinload(DeliveryItemModel.delivery)
+                      )
+    )
+    item = stmt_1.first()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Товар не найден!")
+
+    if item.delivery.id == new_delivery_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Заказ уже находится в данной доставке")
+
+    new_delivery = await db.get(DeliveryModel, new_delivery_id)
+
+    if new_delivery is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Доставка не найдена!")
+
+    delivery_date = new_delivery.created_at
+
+    if item.delivery.created_at != delivery_date:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Нельзя перенаправлять заказ в доставку, которая запланирована на другую дату!")
 
     if item.status != "pending":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Действие над данным товаром производить нельзя, т.к. он уже обработан!")
@@ -127,6 +136,7 @@ async def change_delivery(delivery_item_id: int,
         delivery_item_id=delivery_item_id,
         old_delivery_id=item.delivery_id,
         new_delivery_id=new_delivery_id,
+        timestamp=delivery_date
     )
     db.add(redirection)
 
