@@ -69,10 +69,10 @@ async def export_products(
     # Создаём CSV в памяти
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')  # точка с запятой для 1С
-    writer.writerow(['id', 'address', 'capacity_per_hour', 'is_active', 'work_start', 'work_end'])     # заголовки
+    writer.writerow(['id', 'address', 'capacity_per_hour', 'work_start', 'work_end'])     # заголовки
 
     for p in pvz:
-        writer.writerow([p.id, p.address, str(p.capacity_per_hour), str(p.is_active), str(p.work_start), str(p.work_end)])
+        writer.writerow([p.id, p.address, str(p.capacity_per_hour), str(p.work_start), str(p.work_end)])
 
     output.seek(0)
 
