@@ -19,7 +19,7 @@ router = APIRouter(prefix="/export", tags=["export"])
 @router.get("/products")
 async def export_products(
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserModel = Depends(get_current_analyst)
+    # current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -53,7 +53,7 @@ async def export_products(
 @router.get("/pvz")
 async def export_products(
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserModel = Depends(get_current_analyst)
+    # current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -95,7 +95,7 @@ async def export_operations(
                                 description="Дата в формате YYYY-MM-DD",
                                 pattern=r"^\d{4}-\d{2}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserModel = Depends(get_current_analyst)
+    # current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -157,7 +157,7 @@ async def export_redirections(
                                 description="Дата в формате YYYY-MM-DD",
                                 pattern=r"^\d{4}-\d{2}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserModel = Depends(get_current_analyst)
+    # current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Выгружает все
@@ -212,7 +212,7 @@ async def export_daily_load(
                 pattern = r"^\d{4}-\d{2}-\d{2}$"),
 
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserModel = Depends(get_current_analyst)
+    # current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Возвращает почасовую нагрузку на ПВЗ за указанную дату.
@@ -254,7 +254,7 @@ async def export_weekly_load(
                                 pattern=r"^\d{4}-\d{2}-\d{2}$"),
 
         db: AsyncSession = Depends(get_async_db),
-        current_user: UserModel = Depends(get_current_analyst)
+        # current_user: UserModel = Depends(get_current_analyst)
 ):
     """
     Возвращает недельный отчёт о нагрузке ПВЗ.
