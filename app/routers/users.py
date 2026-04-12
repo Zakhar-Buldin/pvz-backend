@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-
+from sqlalchemy.orm import selectinload
 from app.models.users import User as UserModel
 from app.models.pvz import PVZ as PVZModel
 from app.schemas import UserCreate, User as UserSchema
@@ -56,17 +56,26 @@ async def create_user(user: UserCreate, db: AsyncSession = Depends(get_async_db)
     # Сохранение в БД
     db.add(db_user)
     await db.commit()
-    await db.refresh(db_user)
+
+    stmt = select(UserModel).where(UserModel.id == db_user.id).options(selectinload(UserModel.pvz))
+    result = await db.scalars(stmt)
+    db_user = result.first()
     return db_user
+
 
 @router.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(),
                 db: AsyncSession = Depends(get_async_db)):
     """
-    Аутентифицирует пользователя и возвращает JWT с email, role и id.
+    Аутентифицирует пользователя и возвращает JWT с email, role и id,
+    а также данные пользователя (включая ПВЗ для оператора).
     """
+    # Загружаем пользователя с подгрузкой связи pvz
     result = await db.scalars(
-        select(UserModel).where(UserModel.email == form_data.username))
+        select(UserModel)
+        .where(UserModel.email == form_data.username)
+        .options(selectinload(UserModel.pvz))
+    )
     user = result.first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
@@ -74,5 +83,23 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(),
             detail="Некорректный email или пароль",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     access_token = create_access_token(data={"sub": user.email, "role": user.role, "id": user.id})
-    return {"access_token": access_token, "token_type": "bearer"}
+
+    # Формируем данные пользователя с ПВЗ (если есть)
+    user_data = {
+        "id": user.id,
+        "email": user.email,
+        "role": user.role,
+        "pvz": {
+            "address": user.pvz.address,
+            "work_start": user.pvz.work_start,
+            "work_end": user.pvz.work_end
+        } if user.pvz else None
+    }
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_data
+    }

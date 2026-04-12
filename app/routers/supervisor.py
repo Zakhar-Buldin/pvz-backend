@@ -1,9 +1,8 @@
 from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.params import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db_depends import get_async_db
-from app.schemas import DailyLoadReport as DailyLoadReportSchema, WeeklyLoadReport as WeeklyLoadReportSchema, Operation as OperationSchema
+from app.schemas import DailyLoadReport as DailyLoadReportSchema, WeeklyLoadReport as WeeklyLoadReportSchema, Operation as OperationSchema, Delivery as DeliverySchema
 from sqlalchemy import select, update
 from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as DeliveryModel
 from app.schemas import DeliveryItem as DeliveryItemSchema
@@ -17,10 +16,12 @@ from app.models import User as UserModel
 from app.auth import get_current_supervisor
 from app.models.pvz import PVZ as PVZModel
 from sqlalchemy.orm import selectinload
+
 router = APIRouter(
     prefix="/supervisor",
     tags=["supervisor"],
 )
+
 
 @router.get("/statistics/one_day/{pvz_id}", response_model=DailyLoadReportSchema)
 async def get_daily_load(
@@ -109,7 +110,7 @@ async def change_delivery(delivery_item_id: int,
     stmt_1 = await db.scalars(select(DeliveryItemModel)
                       .where(DeliveryItemModel.id == delivery_item_id)
                       .options(
-                            selectinload(DeliveryItemModel.delivery)
+                            selectinload(DeliveryItemModel.delivery).selectinload(DeliveryModel.pvz)
                       )
     )
     item = stmt_1.first()
@@ -147,7 +148,12 @@ async def change_delivery(delivery_item_id: int,
     )
 
     await db.commit()
-    await db.refresh(item)
+    result = await db.scalars(
+        select(DeliveryItemModel)
+        .where(DeliveryItemModel.id == delivery_item_id)
+        .options(selectinload(DeliveryItemModel.delivery).selectinload(DeliveryModel.pvz))
+    )
+    item = result.first()
     return item
 
 @router.put("/change_pvz_for_operator/{operator_id}")
@@ -178,4 +184,61 @@ async def change_pvz_for_operator(
     return {"message": f"Оператор {operator_id} закреплён за ПВЗ {operator.pvz_id}"}
 
 
+@router.get("/delivery_items/{pvz_id}", response_model=list[DeliveryItemSchema])
+async def get_deliveries(
+                     pvz_id: int,
+                     created_date: str  = Query(...,
+                                            description="Дата формате YYYY-MM-DD (к примеру, 2024-01-01)",
+                                            pattern=r"^\d{4}-\d{2}-\d{2}$"
+                                            ),
+                     db: AsyncSession = Depends(get_async_db),
+                     current_user: UserModel = Depends(get_current_supervisor)
+):
+    """Возвращает список заказов ПВЗ за конкретную дату"""
+    pvz = await db.get(PVZModel, pvz_id)
+    if pvz is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ПВЗ не найден!")
 
+    try:
+        target_date = datetime.strptime(created_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Неверный формат даты. Ожидается YYYY-MM-DD."
+            )
+
+    items = await db.scalars(
+        select(DeliveryItemModel)
+        .join(DeliveryModel)
+        .options(
+            selectinload(DeliveryItemModel.delivery).selectinload(DeliveryModel.pvz)
+        )
+        .where(DeliveryModel.pvz_id == pvz_id)
+        .where(DeliveryModel.created_at == target_date)
+        .where(DeliveryItemModel.status == "pending")
+    )
+    return items.all()
+
+@router.get("/deliveries_for_redirect/{delivery_item_id}", response_model=list[DeliverySchema])
+async def get_all_pvz(
+                        delivery_item_id: int,
+                        db: AsyncSession = Depends(get_async_db),
+                        current_user: UserModel = Depends(get_current_supervisor)
+):
+    stmt = await db.scalars(
+        select(DeliveryItemModel)
+        .options(selectinload(DeliveryItemModel.delivery))
+        .where(DeliveryItemModel.id == delivery_item_id)
+    )
+
+    item = stmt.first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Заказ не найден!")
+
+    deliveries = await db.scalars(
+        select(DeliveryModel)
+        .options(selectinload(DeliveryModel.pvz))
+        .where(DeliveryModel.created_at == item.delivery.created_at)
+        .where(DeliveryModel.id != item.delivery.id)
+    )
+    return deliveries.all()

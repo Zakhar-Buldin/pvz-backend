@@ -9,7 +9,7 @@ class Operation(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     delivery_item_id: Mapped[int] = mapped_column(ForeignKey("delivery_items.id"), nullable=False)
-    pvz_id: Mapped[int] = mapped_column(ForeignKey("pvz.id"), nullable=False)  # денормализация
+    pvz_id: Mapped[int] = mapped_column(ForeignKey("pvz.id"), nullable=False)
     action: Mapped[str] = mapped_column(String(50), nullable=False)  # например 'received', 'issued', 'returned'
     timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 

@@ -8,14 +8,11 @@ from app.models.operations import Operation as OperationModel
 from app.models.pvz import PVZ as PVZModel
 from sqlalchemy import select, text
 from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as DeliveryModel
-from app.schemas import Delivery as DeliverySchema
 from app.models.products import Product as ProductModel
 from app.auth import get_current_tester
 from app.models import User as UserModel
 from app.models import Redirection as RedirectionModel
 import random
-
-
 
 router = APIRouter(
     prefix="/tester",
@@ -23,7 +20,7 @@ router = APIRouter(
 )
 
 # POST эндпоинт для создания поставки на ПВЗ
-@router.post("/accept_delivery/{pvz_id}", response_model=DeliverySchema)
+@router.post("/accept_delivery/{pvz_id}")
 async def accept_random_delivery(
         pvz_id: int,
         db: AsyncSession = Depends(get_async_db),
@@ -55,18 +52,22 @@ async def accept_random_delivery(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ПВЗ с ID {pvz_id} не найден"
         )
+    other_delivery = await db.scalars(
+        select(DeliveryModel)
+        .where(DeliveryModel.pvz_id == pvz_id)
+        .where(DeliveryModel.created_at == result_date)
+    )
 
-    # 1. Получаем все товары, которые есть в наличии
+    if other_delivery.first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"На эту дату для ПВЗ {pvz_id} уже создана доставка!")
+
     products_query = await db.scalars(
         select(ProductModel)
     )
     available_products = products_query.all()
 
-
-    # 2. Выбираем случайное количество товаров для поставки
     selected_products = [available_products[random.randint(0, len(available_products) - 1)] for _ in range(random.randint(min_quan, max_quan))]
 
-    # 3. Создаём поставку
     new_delivery = DeliveryModel(
         pvz_id=pvz_id,
         total_price=sum(i.price for i in selected_products),
@@ -74,9 +75,8 @@ async def accept_random_delivery(
     )
 
     db.add(new_delivery)
-    await db.flush()  # получаем ID новой поставки
+    await db.flush()
 
-    # 4. Создаём товары для поставки (все со статусом received)
     delivery_items = []
     for product in selected_products:
 
@@ -88,14 +88,10 @@ async def accept_random_delivery(
         delivery_items.append(delivery_item)
         db.add(delivery_item)
 
-
-    # 5. Сохраняем всё в БД
     await db.commit()
-
-    # 6. Загружаем связанные товары для ответа
     await db.refresh(new_delivery, attribute_names=["items"])
 
-    return new_delivery
+    return {"message": f"Для ПВЗ №{pvz_id} создана доставка №{new_delivery.id}, состоящая из {len(delivery_items)} заказов"}
 
 
 @router.delete("/clear_all_data", status_code=status.HTTP_204_NO_CONTENT)

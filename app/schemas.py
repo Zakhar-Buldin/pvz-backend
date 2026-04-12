@@ -1,21 +1,29 @@
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, date
+from typing import Optional
 
-class DeliveryItem(BaseModel):
-    id: int = Field(..., description="Уникальный идентификатор записи")
-    delivery_id: int = Field(..., description="ID поставки")
-    product_id: int = Field(..., description="ID товара")
-    status: str = Field(default="pending", description="Статус товара")
-
+class PVZ(BaseModel):
+    id: int = Field(..., description="ID ПВЗ")
+    address: str = Field(..., description="Адрес ПВЗ")
+    work_start: str = Field(..., description="Время начала рабочего дня")
+    work_end: str = Field(..., description="Время конца рабочего дня")
     model_config = ConfigDict(from_attributes=True)
 
 class Delivery(BaseModel):
     id: int = Field(..., description="Уникальный идентификатор поставки")
     pvz_id: int = Field(..., description="ID пункта выдачи")
     total_price: Decimal = Field(gt=0, decimal_places=2)
-    items: list[DeliveryItem] = Field(..., description="Товары в поставке")
+    created_at: date
+    pvz: Optional[PVZ] = None
     model_config = ConfigDict(from_attributes=True)
+
+class DeliveryItem(BaseModel):
+    id: int = Field(..., description="Уникальный идентификатор записи")
+    delivery_id: int = Field(..., description="ID поставки")
+    product_id: int = Field(..., description="ID товара")
+    status: str = Field(default="pending", description="Статус товара")
+    delivery: Delivery = Field(..., description="Доставка, в которой находится заказ")
 
 class Operation(BaseModel):
     id: int = Field(..., description="Уникальный идентификатор операции")
@@ -57,8 +65,10 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8, description="Пароль (минимум 8 символов)")
     role: str = Field(..., pattern="^(operator|supervisor|tester|analyst)$", description="Роли: operator, supervisor, tester или analyst")
 
+
 class User(BaseModel):
     id: int = Field(..., description="ID пользователя")
     email: EmailStr = Field(description="Email пользователя")
     role: str = Field(..., description="Роли: operator, supervisor, tester или analyst")
+    pvz: PVZ | None = Field(description="ПВЗ оператора")
     model_config = ConfigDict(from_attributes=True)

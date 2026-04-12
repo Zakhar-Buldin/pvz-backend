@@ -4,7 +4,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db_depends import get_async_db
 from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as DeliveryModel
-from app.schemas import Delivery as DeliverySchema, DeliveryItem as DeliveryItemSchema
+from app.schemas import DeliveryItem as DeliveryItemSchema
 from sqlalchemy.orm import selectinload
 from app.models.operations import Operation as OperationModel
 from datetime import datetime
@@ -107,8 +107,12 @@ async def update_order_status(
     await db.commit()
 
     # Обновляем объект для ответа
-    await db.refresh(order)
-    return order
+    result = await db.scalars(
+        select(DeliveryItemModel)
+        .where(DeliveryItemModel.id == delivery_item_id)
+        .options(selectinload(DeliveryItemModel.delivery).selectinload(DeliveryModel.pvz))
+    )
+    return result.first()
 
 # PUT эндпоинт для получения оператором всех заказов (изменения их статуса на received)
 @router.put("/received_delivery_item/{delivery_item_id}", response_model=DeliveryItemSchema)
@@ -117,7 +121,7 @@ async def receive_item(delivery_item_id: int,
                       receiving_time: str = Query(...,
                                                         description="Время в формате HH:MM (к примеру, 14:30)",
                                                         pattern=r"^([0-1][0-9]|2[0-3]):[0-5][0-9]$"),
-                    current_user: UserModel = Depends(get_current_operator)
+                      current_user: UserModel = Depends(get_current_operator)
     ):
     """
     Эндпоинт принятия доставки со склада
@@ -192,36 +196,54 @@ async def receive_item(delivery_item_id: int,
     )
     await db.commit()
 
-    # Обновляем объект для ответа
-    await db.refresh(order)
-    return order
+    result = await db.scalars(
+        select(DeliveryItemModel)
+        .where(DeliveryItemModel.id == delivery_item_id)
+        .options(selectinload(DeliveryItemModel.delivery).selectinload(DeliveryModel.pvz))
+    )
+    return result.first()
 
 
 # GET эндпоинт для получения списка заказов
-@router.get("/delivery", response_model=list[DeliverySchema])
+@router.get("/delivery_items", response_model=list[DeliveryItemSchema])
 async def get_deliveries(
-                     created_date: str = Query(...,
+                     created_date: str | None = Query(None,
                                             description="Дата формате YYYY-MM-DD (к примеру, 2024-01-01)",
                                             pattern=r"^\d{4}-\d{2}-\d{2}$"
                                             ),
+                     status_order: str | None = Query(None,
+                                            description="Фильтрация по статусу заказа",
+                                            pattern=r"^(pending|received|issued|returned)$"),
                      db: AsyncSession = Depends(get_async_db),
                      current_user: UserModel = Depends(get_current_operator)):
     """Возвращает список заказов конкретного ПВЗ"""
-    try:
-        target_date = datetime.strptime(created_date, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Неверный формат даты. Ожидается YYYY-MM-DD."
-        )
 
-    delivery = await db.scalars(
-        select(DeliveryModel)
-        .options(selectinload(DeliveryModel.items))
-        .where(DeliveryModel.pvz_id == current_user.pvz_id)
-        .where(DeliveryModel.created_at == target_date)
+    if current_user.pvz_id is None:
+        raise HTTPException(status_code=403, detail="Оператор не привязан к ПВЗ")
+    filters = [DeliveryModel.pvz_id == current_user.pvz_id]
+
+    if created_date:
+        try:
+            target_date = datetime.strptime(created_date, "%Y-%m-%d").date()
+            filters.append(DeliveryModel.created_at == target_date)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Неверный формат даты. Ожидается YYYY-MM-DD."
+            )
+    else:
+        filters.append(DeliveryModel.created_at == datetime.now().date())
+
+    if status_order:
+        filters.append(DeliveryItemModel.status == status_order)
+
+    items = await db.scalars(
+        select(DeliveryItemModel)
+        .join(DeliveryModel)
+        .options(selectinload(DeliveryItemModel.delivery).selectinload(DeliveryModel.pvz))
+        .where(*filters)
     )
-    return delivery.all()
+    return items.all()
 
 
 
