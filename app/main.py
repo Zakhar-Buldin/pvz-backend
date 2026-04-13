@@ -9,9 +9,10 @@ app.include_router(tester.router)
 app.include_router(analyst.router)
 app.include_router(users.router)
 
+# Разрешает только localhost и 127.0.0.1 с любыми портами из 4 цифр
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5177", "http://127.0.0.1:5177"],  # или ["*"] для всех (только для разработки)
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1):\d{4}$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
