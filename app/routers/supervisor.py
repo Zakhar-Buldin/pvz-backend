@@ -5,7 +5,7 @@ from app.db_depends import get_async_db
 from app.schemas import DailyLoadReport as DailyLoadReportSchema, WeeklyLoadReport as WeeklyLoadReportSchema, Operation as OperationSchema, Delivery as DeliverySchema
 from sqlalchemy import select, update
 from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as DeliveryModel
-from app.schemas import DeliveryItem as DeliveryItemSchema
+from app.schemas import DeliveryItem as DeliveryItemSchema, PVZ as PVZSchema
 from app.models.redirections import Redirection as RedirectionModel
 from app.services.overloads_service import get_daily_load_data, get_weekly_load_data
 from app.services.operations_service import get_operations_data
@@ -242,3 +242,11 @@ async def get_all_pvz(
         .where(DeliveryModel.id != item.delivery.id)
     )
     return deliveries.all()
+
+@router.get("/all_pvz", response_model=list[PVZSchema])
+async def get_all_pvz(
+        db_user: UserModel = Depends(get_current_supervisor),
+        db: AsyncSession = Depends(get_async_db)
+):
+    pvz_list = await db.scalars(select(PVZModel))
+    return pvz_list.all()

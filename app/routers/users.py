@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -8,12 +8,16 @@ from app.schemas import UserCreate, User as UserSchema
 from app.db_depends import get_async_db
 from app.auth import hash_password, verify_password, create_access_token
 from fastapi.security import OAuth2PasswordRequestForm
+from app.auth import get_current_user
+from app.services.image_service import save_user_image, remove_user_image
 
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 @router.post("/", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
-async def create_user(user: UserCreate, db: AsyncSession = Depends(get_async_db)):
+async def create_user(user: UserCreate = Depends(UserCreate.as_form),
+                      image: UploadFile | None = File(None),
+                      db: AsyncSession = Depends(get_async_db)):
     """
     Эндпоинт для регистрации нового пользователя.
     Если роль оператора, автоматически назначается ПВЗ с наименьшим числом операторов
@@ -23,13 +27,16 @@ async def create_user(user: UserCreate, db: AsyncSession = Depends(get_async_db)
     # Проверка на существующее имя пользователя (желательно добавить для надёжности)
     existing = await db.scalar(select(UserModel).where(UserModel.email == user.email))
     if existing:
-        raise HTTPException(status_code=409, detail="Пользователь с таким именем уже существует")
+        raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
 
+    image_url = await save_user_image(image) if image else "/media/default_avatar.webp"
     # Создание объекта пользователя
     db_user = UserModel(
+        name=user.name,
         email=user.email,
         hashed_password=hash_password(user.password),
-        role=user.role
+        role=user.role,
+        image_url=image_url
     )
 
     # Если роль оператора – ищем оптимальный ПВЗ
@@ -39,19 +46,13 @@ async def create_user(user: UserCreate, db: AsyncSession = Depends(get_async_db)
             select(PVZModel, func.count(UserModel.id).label("op_count"))
             .outerjoin(UserModel, UserModel.pvz_id == PVZModel.id)
             .group_by(PVZModel.id)
-            .order_by(func.count(UserModel.id))  # сортировка по возрастанию числа операторов
+            .order_by(func.count(UserModel.id), PVZModel.id)  # сортировка по возрастанию числа операторов
         )
         pvz_with_count = result.all()
 
-        if not pvz_with_count:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Нет доступных ПВЗ для назначения оператора"
-            )
-
-        # Берём первый ПВЗ (с минимальным количеством операторов)
-        best_pvz, _ = pvz_with_count[0]
-        db_user.pvz_id = best_pvz.id
+        if pvz_with_count:
+            best_pvz, _ = pvz_with_count[0]
+            db_user.pvz_id = best_pvz.id
 
     # Сохранение в БД
     db.add(db_user)
@@ -89,6 +90,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(),
     # Формируем данные пользователя с ПВЗ (если есть)
     user_data = {
         "id": user.id,
+        "name": user.name,
         "email": user.email,
         "role": user.role,
         "pvz": {
@@ -103,3 +105,53 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(),
         "token_type": "bearer",
         "user": user_data
     }
+
+@router.put("/update_name", status_code=status.HTTP_200_OK)
+async def update_name(
+        new_name: str = Query(..., min_length=3, max_length=50, description="Новое имя пользователя"),
+        db_user: UserModel = Depends(get_current_user),
+        db: AsyncSession = Depends(get_async_db)
+):
+
+    db_user.name = new_name
+    await db.commit()
+    return {"message": f"Пользователь с ID {db_user.id} поменял имя на {new_name}"}
+
+
+@router.put("/update_image", status_code=status.HTTP_200_OK)
+async def update_image(
+    image: UploadFile = File(...),
+    db_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    if not image.filename:
+        raise HTTPException(400, "Файл не выбран")
+
+    new_image_url = await save_user_image(image)
+    old_image_url = db_user.image_url
+
+    # Сначала обновляем БД
+    db_user.image_url = new_image_url
+    await db.commit()
+
+    # После успешного коммита удаляем старый файл (если не дефолтный)
+    if old_image_url and old_image_url != "/media/default_avatar.webp":
+        remove_user_image(old_image_url)
+
+    return {"message": "Фотография профиля успешно поменяна",
+            "image_url": new_image_url}
+
+@router.put("/delete_image", status_code=status.HTTP_200_OK)
+async def delete_image(
+        db_user: UserModel = Depends(get_current_user),
+        db: AsyncSession = Depends(get_async_db)
+):
+    old_image_url = db_user.image_url
+
+    db_user.image_url = "/media/default_avatar.webp"
+    await db.commit()
+
+    if old_image_url  and old_image_url != "/media/default_avatar.webp":
+        remove_user_image(old_image_url)
+
+    return {"message": "Фотография профиля сброшена на стандартную"}

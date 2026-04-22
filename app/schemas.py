@@ -1,7 +1,10 @@
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from decimal import Decimal
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, Annotated
+from fastapi import Form
+
+
 
 class PVZ(BaseModel):
     id: int = Field(..., description="ID ПВЗ")
@@ -61,14 +64,30 @@ class Redirection(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class UserCreate(BaseModel):
-    email: EmailStr = Field(description="Email пользователя")
+    name: str = Field(..., min_length=3, max_length=50, description="Имя пользователя")
+    email: EmailStr = Field(..., description="Email пользователя")
     password: str = Field(..., min_length=8, description="Пароль (минимум 8 символов)")
     role: str = Field(..., pattern="^(operator|supervisor|tester|analyst)$", description="Роли: operator, supervisor, tester или analyst")
+    @classmethod
+    def as_form(cls,
+                  name: Annotated[str, Form(...)],
+                  email: Annotated[EmailStr, Form(...)],
+                  password: Annotated[str, Form(...)],
+                  role: Annotated[str, Form(...)]
+    ) -> "UserCreate":
+        return cls(
+            name=name,
+            email=email,
+            password=password,
+            role=role
+        )
 
 
 class User(BaseModel):
     id: int = Field(..., description="ID пользователя")
+    name: str = Field(..., description="Имя пользователя")
     email: EmailStr = Field(description="Email пользователя")
     role: str = Field(..., description="Роли: operator, supervisor, tester или analyst")
     pvz: PVZ | None = Field(description="ПВЗ оператора")
+    image_url: str = Field(..., description="Фотография профиля")
     model_config = ConfigDict(from_attributes=True)
