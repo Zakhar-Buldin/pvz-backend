@@ -70,6 +70,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(),
     """
     Аутентифицирует пользователя и возвращает JWT с email, role и id,
     а также данные пользователя (включая ПВЗ для оператора).
+    В user_data вшиты все необходимые данные для фронтенда
     """
     # Загружаем пользователя с подгрузкой связи pvz
     result = await db.scalars(
@@ -91,6 +92,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(),
     user_data = {
         "id": user.id,
         "name": user.name,
+        "image_url": user.image_url,
         "email": user.email,
         "role": user.role,
         "pvz": {
@@ -106,24 +108,29 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(),
         "user": user_data
     }
 
-@router.put("/update_name", status_code=status.HTTP_200_OK)
+@router.patch("/update_name", status_code=200)
 async def update_name(
         new_name: str = Query(..., min_length=3, max_length=50, description="Новое имя пользователя"),
         db_user: UserModel = Depends(get_current_user),
         db: AsyncSession = Depends(get_async_db)
 ):
-
+    """
+    Эндпоинт для обновления имени
+    """
     db_user.name = new_name
     await db.commit()
     return {"message": f"Пользователь с ID {db_user.id} поменял имя на {new_name}"}
 
 
-@router.put("/update_image", status_code=status.HTTP_200_OK)
+@router.patch("/update_image", status_code=status.HTTP_200_OK)
 async def update_image(
     image: UploadFile = File(...),
     db_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
+    """
+    Эндпоинт для обновления аватарки
+    """
     if not image.filename:
         raise HTTPException(400, "Файл не выбран")
 
@@ -141,11 +148,14 @@ async def update_image(
     return {"message": "Фотография профиля успешно поменяна",
             "image_url": new_image_url}
 
-@router.put("/delete_image", status_code=status.HTTP_200_OK)
+@router.patch("/delete_image", status_code=status.HTTP_200_OK)
 async def delete_image(
         db_user: UserModel = Depends(get_current_user),
         db: AsyncSession = Depends(get_async_db)
 ):
+    """
+    Эндпоинт для удаления аватарки и замены на дефолтную с Грю
+    """
     old_image_url = db_user.image_url
 
     db_user.image_url = "/media/default_avatar.webp"
@@ -154,4 +164,5 @@ async def delete_image(
     if old_image_url  and old_image_url != "/media/default_avatar.webp":
         remove_user_image(old_image_url)
 
-    return {"message": "Фотография профиля сброшена на стандартную"}
+    return {"message": "Фотография профиля сброшена на стандартную",
+            "image_url": "/media/default_avatar.webp"}
