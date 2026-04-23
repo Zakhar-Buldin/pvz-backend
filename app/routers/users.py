@@ -108,7 +108,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(),
         "user": user_data
     }
 
-@router.patch("/update_name", status_code=200)
+@router.patch("/update_name", response_model=UserSchema, status_code=200)
 async def update_name(
         new_name: str = Query(..., min_length=3, max_length=50, description="Новое имя пользователя"),
         db_user: UserModel = Depends(get_current_user),
@@ -119,7 +119,13 @@ async def update_name(
     """
     db_user.name = new_name
     await db.commit()
-    return {"message": f"Пользователь с ID {db_user.id} поменял имя на {new_name}"}
+
+    stmt = await db.scalars(
+        select(UserModel).where(UserModel.id == db_user.id).options(selectinload(UserModel.pvz))
+    )
+    db_user = stmt.first()
+    return db_user
+
 
 
 @router.patch("/update_image", status_code=status.HTTP_200_OK)
