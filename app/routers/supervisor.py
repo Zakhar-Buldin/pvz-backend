@@ -16,6 +16,7 @@ from app.models import User as UserModel
 from app.auth import get_current_supervisor
 from app.models.pvz import PVZ as PVZModel
 from sqlalchemy.orm import selectinload
+from app.schemas import User as UserSchema
 
 router = APIRouter(
     prefix="/supervisor",
@@ -156,7 +157,7 @@ async def change_delivery(delivery_item_id: int,
     item = result.first()
     return item
 
-@router.put("/change_pvz_for_operator/{operator_id}")
+@router.patch("/change_pvz_for_operator/{operator_id}")
 async def change_pvz_for_operator(
                                 operator_id: int,
                                 new_pvz_id: int,
@@ -182,6 +183,16 @@ async def change_pvz_for_operator(
     await db.commit()
     await db.refresh(operator)
     return {"message": f"Оператор {operator_id} закреплён за ПВЗ {operator.pvz_id}"}
+
+@router.get("/operators", response_model=list[UserSchema])
+async def get_operators(db: AsyncSession = Depends(get_async_db),
+                        current_user: UserModel = Depends(get_current_supervisor)):
+    stmt = await db.scalars(
+        select(UserModel).where(UserModel.role == "operator")
+        .options(selectinload(UserModel.pvz))
+        .order_by(UserModel.id)
+    )
+    return stmt.all()
 
 
 @router.get("/delivery_items/{pvz_id}", response_model=list[DeliveryItemSchema])
