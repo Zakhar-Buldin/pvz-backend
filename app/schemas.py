@@ -82,7 +82,6 @@ class UserCreate(BaseModel):
             role=role
         )
 
-
 class User(BaseModel):
     id: int = Field(..., description="ID пользователя")
     name: str = Field(..., description="Имя пользователя")
@@ -91,3 +90,28 @@ class User(BaseModel):
     pvz: PVZ | None = Field(description="ПВЗ оператора")
     image_url: str = Field(..., description="Фотография профиля")
     model_config = ConfigDict(from_attributes=True)
+
+class NotificationCreate(BaseModel):
+    """
+    Типы проблем:
+        1 - техническая проблема
+        2 - проблема с заказом
+        3 - конфликт с клиентом
+        4 - неисправность оборудования
+        5 - Другое
+    """
+    type_problem: int = Field(..., ge=1, le=5, description="Тип проблемы")
+    priority: int = Field(..., ge=1, le=3, description="Приоритет проблемы")
+    message: str = Field(..., min_length=3, max_length=1000, description="Описание проблемы")
+
+class Notification(BaseModel):
+    id: int = Field(..., description="ID уведомления")
+    pvz_id: int = Field(..., description="ID ПВЗ")
+    operator_id: int = Field(..., description="ID оператора")
+    type_problem: int = Field(..., description="Тип проблемы")
+    priority: int = Field(..., description="Приоритет проблемы")
+    message: str = Field(..., min_length=3, max_length=1000, description="Описание проблемы")
+    status: str = Field(..., pattern="^(pending|completed)")
+    timestamp: date = Field(..., description="Время отправки уведомления")
+    model_config = ConfigDict(from_attributes=True)
+

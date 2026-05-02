@@ -4,5 +4,6 @@ from .deliveries import Delivery, DeliveryItem
 from .operations import Operation
 from .redirections import Redirection
 from .users import User
+from .notifications import Notification
 
-__all__ = ["Product", "PVZ", "Delivery", "DeliveryItem", "Operation", "Redirection", "User"]
+__all__ = ["Product", "PVZ", "Delivery", "DeliveryItem", "Operation", "Redirection", "User", "Notification"]

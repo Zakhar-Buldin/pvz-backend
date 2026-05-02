@@ -11,6 +11,8 @@ from datetime import datetime
 from app.auth import get_current_operator
 from app.models.users import User as UserModel
 from app.models.pvz import PVZ as PVZModel
+from app.schemas import NotificationCreate, Notification as NotificationSchema
+from app.models.notifications import Notification as NotificationModel
 
 router = APIRouter(
     prefix="/operator",
@@ -245,5 +247,33 @@ async def get_deliveries(
     )
     return items.all()
 
+@router.post("/create_notification", response_model=NotificationSchema)
+async def create_notification(
+        create_notif: NotificationCreate,
+        db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_operator)
+):
+    notification = NotificationModel(
+        pvz_id=current_user.pvz_id,
+        operator_id=current_user.id,
+        type_problem=create_notif.type_problem,
+        priority=create_notif.priority,
+        message=create_notif.message,
+        status="pending",
+        timestamp=datetime.now().date()
+    )
+    db.add(notification)
+    await db.commit()
+    await db.refresh(notification)
+    return notification
 
-
+@router.get("/notifications", response_model=list[NotificationSchema])
+async def get_notifications(
+        db: AsyncSession = Depends(get_async_db),
+        current_user: UserModel = Depends(get_current_operator)
+):
+    notifications = await db.scalars(
+        select(NotificationModel)
+        .where(NotificationModel.pvz_id == current_user.pvz_id)
+        .order_by(NotificationModel.priority, NotificationModel.timestamp.desc()))
+    return notifications.all()

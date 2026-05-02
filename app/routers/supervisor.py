@@ -8,7 +8,6 @@ from app.models.deliveries import DeliveryItem as DeliveryItemModel, Delivery as
 from app.schemas import DeliveryItem as DeliveryItemSchema, PVZ as PVZSchema
 from app.models.redirections import Redirection as RedirectionModel
 from app.services.overloads_service import get_daily_load_data, get_weekly_load_data
-from app.services.operations_service import get_operations_data
 from datetime import datetime
 from app.services.operations_service import PVZNotFoundError
 from app.services.overloads_service import InvalidDateError
@@ -17,6 +16,10 @@ from app.auth import get_current_supervisor
 from app.models.pvz import PVZ as PVZModel
 from sqlalchemy.orm import selectinload
 from app.schemas import User as UserSchema
+from app.models.notifications import Notification as NotificationModel
+from app.schemas import Notification as NotificationSchema
+from datetime import timedelta
+
 
 router = APIRouter(
     prefix="/supervisor",
@@ -62,41 +65,6 @@ async def get_weekly_load(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return report
-
-
-@router.get("/operations/{pvz_id}", response_model=list[OperationSchema])
-async def get_operations(
-    pvz_id: int,
-    str_date: str | None = Query(
-        None,
-        description="Дата в формате YYYY-MM-DD",
-        pattern=r"^\d{4}-\d{2}-\d{2}$"  # опциональная проверка формата
-    ),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: UserModel = Depends(get_current_supervisor)
-):
-    """
-    Возвращает все операции, совершённые на ПВЗ.
-    Можно фильтровать по дате (параметр str_date).
-    """
-    # Преобразуем строку в datetime, если передана
-    target_date = None
-    if str_date:
-        try:
-            target_date = datetime.strptime(str_date, "%Y-%m-%d")
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Неверный формат даты. Ожидается YYYY-MM-DD."
-            )
-
-    try:
-        operations = await get_operations_data(pvz_id, db, target_date)
-    except PVZNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-    return operations
-
 
 
 @router.put("/change_delivery/{delivery_item_id}", response_model=DeliveryItemSchema)
@@ -261,3 +229,38 @@ async def get_all_pvz(
 ):
     pvz_list = await db.scalars(select(PVZModel))
     return pvz_list.all()
+
+@router.get("/all_notifications", response_model=list[NotificationSchema])
+async def get_all_notifications(
+        db_user: UserModel = Depends(get_current_supervisor),
+        db: AsyncSession = Depends(get_async_db)
+):
+    current_date = datetime.today().date()
+    week_ago = current_date - timedelta(days=7)
+
+    notifications = await db.scalars(
+        select(NotificationModel)
+        .where(NotificationModel.status == "pending")
+        .where(NotificationModel.timestamp <= current_date)
+        .where(NotificationModel.timestamp >= week_ago)
+        .order_by(NotificationModel.priority, NotificationModel.timestamp, NotificationModel.id)
+    )
+    return notifications.all()
+
+@router.patch("/change_status_notification/{notification_id}", response_model=NotificationSchema)
+async def change_status_notification(
+        notification_id: int,
+        db_user: UserModel = Depends(get_current_supervisor),
+        db: AsyncSession = Depends(get_async_db)
+):
+    notification = await db.get(NotificationModel, notification_id)
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Уведомление не найдено")
+
+    if notification.status == "completed":
+        raise HTTPException(status_code=409, detail="Уведомление уже обработано")
+
+    notification.status = "completed"
+    await db.commit()
+    await db.refresh(notification)
+    return notification

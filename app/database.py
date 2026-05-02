@@ -24,3 +24,5 @@ async_session_maker = async_sessionmaker(async_engine, expire_on_commit=False, c
 
 class Base(DeclarativeBase):
     pass
+
+from app.models import *
