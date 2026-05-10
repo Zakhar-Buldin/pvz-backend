@@ -17,7 +17,7 @@ from app.models.pvz import PVZ as PVZModel
 from sqlalchemy.orm import selectinload
 from app.schemas import User as UserSchema
 from app.models.notifications import Notification as NotificationModel
-from app.schemas import Notification as NotificationSchema
+from app.schemas import Notification as NotificationSchema, NotificationUpdate
 from datetime import timedelta
 
 
@@ -250,6 +250,7 @@ async def get_all_notifications(
 @router.patch("/change_status_notification/{notification_id}", response_model=NotificationSchema)
 async def change_status_notification(
         notification_id: int,
+        solution: NotificationUpdate,
         db_user: UserModel = Depends(get_current_supervisor),
         db: AsyncSession = Depends(get_async_db)
 ):
@@ -261,6 +262,9 @@ async def change_status_notification(
         raise HTTPException(status_code=409, detail="Уведомление уже обработано")
 
     notification.status = "completed"
+    notification.problem_solution = solution.problem_solution
+    notification.solution_date = datetime.today().date()
+
     await db.commit()
     await db.refresh(notification)
     return notification

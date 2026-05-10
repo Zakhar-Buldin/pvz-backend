@@ -12,4 +12,6 @@ class Notification(Base):
     priority: Mapped[int] = mapped_column(nullable=False)
     message: Mapped[str] = mapped_column(nullable=False)
     status: Mapped[str] = mapped_column(default="pending", nullable=False)
+    problem_solution: Mapped[str | None] = mapped_column(nullable=True)
+    solution_date: Mapped[date | None] = mapped_column(nullable=True)
     timestamp: Mapped[date] = mapped_column(nullable=False)

@@ -112,6 +112,11 @@ class Notification(BaseModel):
     priority: int = Field(..., description="Приоритет проблемы")
     message: str = Field(..., min_length=3, max_length=1000, description="Описание проблемы")
     status: str = Field(..., pattern="^(pending|completed)")
-    timestamp: date = Field(..., description="Время отправки уведомления")
+    problem_solution: str | None = Field(description="Описание решения проблемы")
+    solution_date: date | None = Field(description="Дата решения проблемы")
+    timestamp: date = Field(..., description="Дата отправки уведомления")
     model_config = ConfigDict(from_attributes=True)
 
+
+class NotificationUpdate(BaseModel):
+    problem_solution: str = Field(..., min_length=3, max_length=1000, description="Описание решения проблемы")
