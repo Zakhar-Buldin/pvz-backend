@@ -270,10 +270,15 @@ async def create_notification(
 @router.get("/notifications", response_model=list[NotificationSchema])
 async def get_notifications(
         db: AsyncSession = Depends(get_async_db),
-        current_user: UserModel = Depends(get_current_operator)
+        current_user: UserModel = Depends(get_current_operator),
+        status_notification: str | None = Query(None, pattern=r"^(pending|completed)$")
 ):
+    filters = [NotificationModel.pvz_id == current_user.pvz_id]
+    if status_notification:
+        filters.append(NotificationModel.status == status_notification)
+
     notifications = await db.scalars(
         select(NotificationModel)
-        .where(NotificationModel.pvz_id == current_user.pvz_id)
+        .where(*filters)
         .order_by(NotificationModel.priority, NotificationModel.timestamp.desc()))
     return notifications.all()
